@@ -1,0 +1,491 @@
+---
+title: "LBB Neural Network & Deep Learning: IBM HR Analytics Employee Attrition & Performance"
+author: "Muh Amri Sidiq"
+date: "`r Sys.Date()`"
+output:  
+  html_document:
+    theme: "journal"
+    highlight: espresso
+    toc: true
+    toc_float:
+      collapsed: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+# clear-up the environment
+rm(list = ls())
+
+# chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>"
+)
+
+options(scipen = 999)
+```
+
+
+# Introduction
+
+Deep learning is a framework that is often used when dealing with unstructured data. Therefore, let's classify images using deep learning with a hard framework. We will use HR Analytics Employee Attrition & Performance data. We will try to find out whether employees will leave / resign with the data we have. Previously we will import the libbrary according to below;
+
+Source: Kaggle
+
+```{r warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(keras)
+library(ggplot2)
+library(neuralnet)
+library(rsample)
+library(tensorflow)
+model <- keras_model_sequential()
+```
+
+# Import Data & Inspection
+
+We'll call data with the read.csv function below:
+
+```{r}
+Attrition <- read.csv("WA_Fn-UseC_-HR-Employee-Attrition.csv")
+```
+
+with head() function we'll take a quick look at our data below;
+
+```{r}
+head(Attrition)
+```
+
+The data contains:
+
+ - `age`                    : Age of employee
+ - `Attrition`              : Attrition of employee (Yes, No)
+ - `BusinessTravel`         : Frequency of business travel (Non-Travel, Travel_Rarely, Travel_Frequently)
+ - `DailyRate`              : Amount of money a company has to pay employee to work for them for a day
+ - `Department`             : Work Department (Research and Development, Sales, Human Resources)
+ - `DistanceFromHome`       : Distance between company and home
+ - `Education`              : Level of education (1: Below College, 2: College, 3: Bachelor, 4: Master, 5: Doctor)
+ - `EducationField`         : Field of Education (Life Sciences, Medical, Human Resources, Technical Degree, Marketing, Other)
+ - `EmployeeCount`          : Count of employee (always 1)
+ - `EmployeeNumber`         : ID Employee
+ - `EnvironmentSatisfaction`: Satisfaction of environment score(1: Low, 2: Medium, 3: High, 4: Very High)
+ - `Gender`                 : Gender (male/female)
+ - `HourlyRate`             : Amount of money a company has to pay employee to work for them for an hour
+ - `JobInvolvement`         : Level of job involvement (1: Low, 2: Medium, 3: High, 4: Very High)
+ - `JobLevel`               : Level of job (1 - 5)
+ - `JobRole`                : Role of job (Sales Executive, Research Scientist, Laboratory Technician, Manager, Healthcare Representative, Sales Representative, Manufacturing Director, Human Resources, Manager)
+ - `JobSatisfaction`        : Satisfaction of job (1: Low, 2: Medium, 3: High, 4: Very High)
+ - `MaritalStatus`          : Marital Status (Married, Single, Divorced)
+ - `MonthlyIncome`          : Monthly Income
+ - `MonthlyRate`            : Percent of salary of hike
+ - `NumCompaniesWorked`     : Total number of companies have been worked with
+ - `Over18`                 : Employee age over 18 years old (Yes, No)
+ - `OverTime`               : Frequently spent overtime working (Yes, No)
+ - `PercentSalaryHike`      : Percent of salary of hike
+ - `PerformanceRating`      : Level of performance assessment (1: Low, 2: Good, 3: Excellent, 4: Outstanding)
+ - `RelationshipSatisfaction`: 	Level of relationship satisfaction (1: Low, 2: Medium, 3: High, 4: Very High)
+ - `StandardHours`          : Standard work hours (always 80)
+ - `StockOptionLevel`       : Stock option level (0 - 3)
+ - `TotalWorkingYears`      : Years of total working
+ - `TrainingTimesLastYear`  : Training times of last year
+ - `WorkLifeBalance`        : Level of work life balance (1: Bad, 2: Good, 3: Better, 4: Best)
+ - `YearsAtCompany`         : Years at company
+ - `YearsInCurrentRole`     : Years in current role
+ - `YearsSinceLastPromotion`: Years since last promotion
+ - `YearsWithCurrManager`   : Years with current manager
+
+# Data Preprocesing
+
+With the command glimpse () we will check whether the data is in accordance with the type or whether there is something that must be changed
+
+```{r}
+glimpse(Attrition)
+```
+
+From the function above, we can get information that the data has 1.470 rows with 35 columns. Some of the data types that we will delete include: `EmployeeNumber` ,`over18`, `EmployeeCount` and `StandardHours`. For data that has a character type, we will change it to a factor.
+
+```{r}
+attrition_clean <- Attrition %>% 
+  select(-EmployeeNumber, -Over18, -EmployeeCount, -StandardHours) %>% 
+  mutate_if(.predicate = is.character, .funs = as.factor)
+```
+
+Next we will check if there are any missing values
+
+```{r}
+colSums(is.na(attrition_clean))
+```
+
+From the function above, we can see that there are no missing values
+
+we will do one hot encoding, with the aim of changing the categorical data type to a dummy variable except coloumn target
+
+```{r}
+attrition_ohe <- model.matrix(Attrition ~ .,attrition_clean)
+```
+
+```{r}
+attrition_ohe1 <- model.matrix( ~ .,attrition_clean)
+```
+
+We must delete `(intercept)` and additional column target `Attrition`
+
+```{r}
+attrition_ohe_clean1 <- 
+attrition_ohe1 %>% 
+  as.data.frame() %>% 
+  select(-'(Intercept)')
+```
+
+
+After doing One Hot Encoding, there are several new column names that have *_*, *space* symbols. While the neuralnet model cannot accept a column name that has a symbol, therefore we must remove the symbol
+
+```{r}
+colnames(attrition_ohe_clean1)
+```
+
+
+With prompt gsub we can remove `space, & , _`
+
+```{r}
+colnames(attrition_ohe_clean1) <- gsub(pattern = "[ &_]", replacement = "", x = colnames(attrition_ohe_clean1))
+```
+
+
+# Exploratory Data Analysis
+
+In this section, we will show some statistics on the distribution of data for each variable in the `attrition_clean` dataset. By using the `summary()` function, the following output is produced:
+
+```{r}
+summary(attrition_clean)
+```
+
+Insight:
+
+ - Mean adn median for `age` is almost same
+ - Most `attrition` is NO with value 1233
+ - `BusinessTravel` most in data is `Travel_Rarely`
+ - `DailyRate` for minimum and maximum is different high
+ - `Departement` count most is `Research & Development`
+ - `DistanceFromHome` most far is 29km
+ - mean `Education` is `bachelor degree`
+ - `EducationField` most is `Life Sciences` with count 606
+ - `Satisfaction` of environment score mean is 2.722
+ - `Gender` `male` is dominan, but gap is not to far
+ - `HourlyRate` rate mean is 65.89, but minimum hourly rate is 3 more times than maximum hourly rate
+ - `Job level` `involement` mean is almost high level
+ - `Level job` mean is 2
+ - `Job role` most count is Sales Executive with 326
+ - `Job satisfaction` mean almost high, almost same as median
+ - `Martial status` most is `married`
+ - `Monthly income` mean is 6503, but minimum monthly income is 20 more times than maximum mounthly income.
+ - `Monthly rate` hike mean is 14313
+ - `NumCompaniesWorked` mean is 2.693
+ - Most of employes is no `overtime` 1054
+ - `PercentSalaryHike` mean is 15.21
+ - `PerformanceRating` mean is 3.154
+ - `RelationshipSatisfaction` mean is 2.712 almost high
+ - `StockOptionLevel` mean is 0.79
+ - `TotalWorkingYears` maximum is 40, and mean is 11.28
+ - `TrainingTimesLastYear` mean is 2.79
+ - `WorkLifeBalance` mean is 2.76 that mena is almost better (3)
+ - `YearsAtCompany` maximum 40th years
+ - `YearsInCurrentRole` mean 4.299
+ - `YearsSinceLastPromotion` maximum is 15 years
+ - `YearsWithCurrManager` maximum is 17 years
+
+From the preprocessing data we will explore what we get, including the correlation between variables and their predictors
+
+```{r}
+attrition_BT <- attrition_clean %>% group_by(Attrition, BusinessTravel) %>% summarise(count= n())
+
+
+ggplot(attrition_BT, mapping = aes(x = count, y = reorder(Attrition, count)))+
+  geom_col(aes(fill = BusinessTravel), position = "dodge")+
+  labs(
+     title = "Total Attrition in HR Analytics Employee Attrition & Performance",
+     subtitle = "Attrition Vs Business Travel",
+     x = "Count Attrition",
+     y = NULL,
+     fill = "Business Travel"
+   ) + theme_light()
+
+```
+
+From above plot `Travel_rarely` is  most `attrition` `no` and `travel_rarely` is most `attrition` `yes`
+
+```{r}
+attrition_dpt <- attrition_clean %>% group_by(Attrition, Department) %>% summarise(count= n())
+
+
+ggplot(attrition_dpt, mapping = aes(x = count, y = reorder(Attrition, count)))+
+  geom_col(aes(fill = Department), position = "dodge")+
+  labs(
+     title = "Total Attrition in HR Analytics Employee Attrition & Performance",
+     subtitle = "Attrition Vs Department",
+     x = "Count Attrition",
+     y = NULL,
+     fill = "Department"
+   ) + theme_light()
+
+```
+
+From Above Plot, `department` `Research & development` is most `attrition` `no` and `departement` `Research & development` is most `attrition` `yes`
+
+```{r}
+attrition_ef <- attrition_clean %>% group_by(Attrition, EducationField) %>% summarise(count= n())
+
+
+ggplot(attrition_ef, mapping = aes(x = count, y = reorder(Attrition, count)))+
+  geom_col(aes(fill = EducationField), position = "dodge")+
+  labs(
+     title = "Total Attrition in HR Analytics Employee Attrition & Performance",
+     subtitle = "Attrition Vs Education Field",
+     x = "Count Attrition",
+     y = NULL,
+     fill = "Education Field"
+   ) + theme_light()
+
+```
+
+From Above Plot, `education` `life sciencis` is most `attrition` `no` and `education` `life sciencis` is most `attrition` `yes`
+
+```{r}
+attrition_jr <- attrition_clean %>% group_by(Attrition, JobRole) %>% summarise(count= n())
+
+
+ggplot(attrition_jr, mapping = aes(x = count, y = reorder(Attrition, count)))+
+  geom_col(aes(fill = JobRole), position = "dodge")+
+  labs(
+     title = "Total Attrition in HR Analytics Employee Attrition & Performance",
+     subtitle = "Attrition Vs Job Role",
+     x = "Count Attrition",
+     y = NULL,
+     fill = "Job Role"
+   ) + theme_light()
+
+```
+
+From Above Plot, `job role` `sales executive` is most `attrition` `no` and than `reaserch scientist` and `job role` `laboratory technician` is most `attrition` `yes`
+
+```{r}
+attrition_ms <- attrition_clean %>% group_by(Attrition, MaritalStatus) %>% summarise(count= n())
+
+
+ggplot(attrition_ms, mapping = aes(x = count, y = reorder(Attrition, count)))+
+  geom_col(aes(fill = MaritalStatus), position = "dodge")+
+  labs(
+     title = "Total Attrition in HR Analytics Employee Attrition & Performance",
+     subtitle = "Attrition Vs Marital Status",
+     x = "Count Attrition",
+     y = NULL,
+     fill = "Marital Status"
+   ) + theme_light()
+
+```
+
+From Above Plot, `martial status` `married` most `attrition` `no` and `martial status` `single` most `attrition` `yes`
+
+```{r}
+attrition_ms <- attrition_clean %>% group_by(Attrition, OverTime) %>% summarise(count= n())
+
+
+ggplot(attrition_ms, mapping = aes(x = count, y = reorder(Attrition, count)))+
+  geom_col(aes(fill = OverTime), position = "dodge")+
+  labs(
+     title = "Total Attrition in HR Analytics Employee Attrition & Performance",
+     subtitle = "Attrition Vs Over Time",
+     x = "Count Attrition",
+     y = NULL,
+     fill = "Over Time"
+   ) + theme_light()
+```
+
+From Above Plot, `over time` `no` most `attrition` `no` and `over time` `yes` most `attrition` `yes`
+
+# Cross Validation
+
+Perform cross validation using `initial_split` with a proportion of 80% data for training data
+
+```{r}
+set.seed(100)
+
+# Spliting
+attrition_split <- initial_split(data = attrition_ohe_clean1, # nama df
+                             prop = 0.8, # proporsi untuk data train
+                             strata = "AttritionYes") # nama label target untuk membuat label target balanced
+
+# Data train
+attrition_train <- training(attrition_split)
+
+# Data validation
+attrition_test <- testing(attrition_split)
+```
+
+Separate the target-predictors, turn the data into a matrix
+
+```{r}
+#prediktor
+train_x <- attrition_train %>% 
+  select(-AttritionYes) %>% 
+  as.matrix()
+
+test_x <- attrition_test %>% 
+  select(-AttritionYes) %>% 
+  as.matrix()
+
+#target
+train_y <- attrition_train %>% 
+  select(AttritionYes) %>% 
+  as.matrix()
+
+test_y <- attrition_test %>% 
+  select(AttritionYes) %>% 
+  as.matrix()
+```
+
+Keras framework accepts data in *array* form. So predictor data in matrix form needs to be converted into array form using `array_reshape()`.
+
+```{r}
+# prediktor
+train_x_keras <- train_x %>% 
+  array_reshape(dim = dim(train_x))
+
+test_x_keras <- test_x %>% 
+  array_reshape(dim = dim(test_x))
+```
+
+Convert the target (categorical data) to a *One Hot Encoding* variable using the `to_categorical()` function:
+
+```{r}
+train_y_keras <- train_y %>% 
+  to_categorical()
+
+test_y_keras <- test_y %>% 
+  to_categorical()
+```
+
+# Model Building
+
+## Define Architecture
+
+
+The first step we do is build the architecture of our deep learning model. In the following, there are some provisions to help deep learning model architecture using *Keras*.
+
+step 1. Always prefixed with `keras_model_sequential()`
+
+```{r}
+# keras initialization
+model <- keras_model_sequential()
+```
+
+step 2. Building each layer (Input, Hidden & Output)
+
+```{r}
+# Untuk mengunci random
+tensorflow::tf$random$set_seed(123)
+ 
+# Please type your answer
+model %>% 
+  layer_dense(input_shape = 44,
+              units = 32,
+              activation = "relu",
+              name = "H1") %>% 
+  layer_dense(units = 16,
+              activation = "relu",
+              name = "H2") %>% 
+  layer_dense(units = 8,
+             activation = "relu",
+             name = "H3") %>% 
+  layer_dense(units = 2,
+              activation = "sigmoid",
+              name = "Out")
+
+summary(model)
+```
+
+Insight:
+
+ - `Total params`       : weight of model 2.122
+ - `Trainable params`   : parameters/connections whose weights can change according to the training process
+ - `Non-trainable params`: weight/parameter values don't change or are locked in value
+
+## Compile a Model
+
+At the stage of building the architecture, we have not provided an error calculation that will be used. It is at this stage that we will provide a way of calculating errors, using the `compile()` function.
+
+```{r}
+model %>% 
+  compile(loss = "binary_crossentropy",
+          optimizer = optimizer_adam(learning_rate =0.001),
+          metrics = "accuracy")
+```
+
+## Fit (Training Model)
+
+```{r}
+history <- model %>% 
+           fit(x = train_x_keras, 
+               y = train_y_keras, 
+               batch_size = 5, 
+               epochs = 15, 
+               verbose = T,
+               test_data = list(test_x_keras, test_y_keras))
+```
+
+Plotting Model:
+
+```{r}
+plot(history)
+```
+
+# Predict
+
+Make predictions on the `test_x_keras` data by using the `predict()` function
+
+```{r}
+# Please type your answer
+predict_class <- predict(model, test_x_keras) %>% 
+  k_argmax() %>%
+  as.array() %>% 
+  as.factor()
+```
+
+to see the prediction results
+
+```{r}
+predict_class %>% 
+  head()
+```
+
+# Evaluation
+
+**Business Question:** Predict whether the employee submits `attrition` `yes` or `no`
+
+- Kelas positif: no (0)
+- Kelas negatif: yes (1)
+
+```{r}
+# Please type your answer
+caret::confusionMatrix(predict_class, as.factor(attrition_test$AttritionYes), positive = "0")
+```
+
+From evaluation, we have matrix:
+
+FN: The `attrition` prediction model is `yes`, even though the actual `attrition` is `no`. Risk: the company provides facilities/salary increase/position promotion. 
+
+FP: The `attrition` prediction model is `no`, even though the actual `attrition` is `yes`. Risk: the company loses employees.
+
+The risk that is concerning is if an FP event occurs so take the Precision evaluation metric
+
+# Conclusion
+
+The total predictors are 48, but we only use 44 because 4 predictors have unique values that do not vary. In `business travel`, `travel rarely` has the highest effect on `attrition` `yes` and `no`. The `research & development` `department` has the highest influence on `attrition` `no` and `yes`. In `education field` `life science` has the highest influence on `attrition` `no` and `yes`. The `sales representative` `job role` has the highest `attrition` `no`, the `laboratory technician` `job role` has the highest `yes` `attrition`. In `martial status` `married` it has the highest influence on `attrition` `no`, in `single` `martial status` it has the highest influence on `attrition` `yes`. In `overtime` `no` has the highest `attrition` `no`, in `overtime` `yes` has the highest `attrition` `yes`. The hiden layer that we use uses 3 layers. The `accuracy` of our model at epoch 15 is 0.8426 and loss 0.4526 . The results of our predictions are 0 and 1, where 0 is no and 1 is yes. From the matrix that we use is *precision* 84% with the risk to the company is the loss of employees
+
+# Reference
+
+ - https://www.kaggle.com/datasets/pavansubhasht/ibm-hr-analytics-attrition-dataset
+
